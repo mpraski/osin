@@ -17,6 +17,7 @@ const (
 	REFRESH_TOKEN      AccessRequestType = "refresh_token"
 	PASSWORD           AccessRequestType = "password"
 	CLIENT_CREDENTIALS AccessRequestType = "client_credentials"
+	SOCIAL             AccessRequestType = "social"
 	ASSERTION          AccessRequestType = "assertion"
 	IMPLICIT           AccessRequestType = "__implicit"
 )
@@ -35,6 +36,8 @@ type AccessRequest struct {
 	Scope           string
 	Username        string
 	Password        string
+	ProviderID      string
+	AccessToken     string
 	AssertionType   string
 	Assertion       string
 
@@ -140,6 +143,8 @@ func (s *Server) HandleAccessRequest(w *Response, r *http.Request) *AccessReques
 			return s.handlePasswordRequest(w, r)
 		case CLIENT_CREDENTIALS:
 			return s.handleClientCredentialsRequest(w, r)
+		case SOCIAL:
+			return s.handleSocialRequest(w, r)
 		case ASSERTION:
 			return s.handleAssertionRequest(w, r)
 		}
@@ -375,6 +380,42 @@ func (s *Server) handlePasswordRequest(w *Response, r *http.Request) *AccessRequ
 	// "username" and "password" is required
 	if ret.Username == "" || ret.Password == "" {
 		s.setErrorAndLog(w, E_INVALID_GRANT, nil, "handle_password=%s", "username and pass required")
+		return nil
+	}
+
+	// must have a valid client
+	if ret.Client = s.getClient(auth, w.Storage, w); ret.Client == nil {
+		return nil
+	}
+
+	// set redirect uri
+	ret.RedirectUri = FirstUri(ret.Client.GetRedirectUri(), s.Config.RedirectUriSeparator)
+
+	return ret
+}
+
+func (s *Server) handleSocialRequest(w *Response, r *http.Request) *AccessRequest {
+	// get client authentication
+	auth := s.getClientAuth(w, r, s.Config.AllowClientSecretInParams)
+	if auth == nil {
+		return nil
+	}
+
+	// generate access token
+	ret := &AccessRequest{
+		Type:            SOCIAL,
+		Username:        r.FormValue("username"),
+		ProviderID:      r.FormValue("provider_id"),
+		AccessToken:     r.FormValue("access_token"),
+		Scope:           r.FormValue("scope"),
+		GenerateRefresh: true,
+		Expiration:      s.Config.AccessExpiration,
+		HttpRequest:     r,
+	}
+
+	// "username" and "password" is required
+	if ret.ProviderID == "" || ret.AccessToken == "" {
+		s.setErrorAndLog(w, E_INVALID_GRANT, nil, "provider_id=%s", "provider_id and access_token required")
 		return nil
 	}
 
